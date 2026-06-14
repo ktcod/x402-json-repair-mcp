@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ktcod/x402-json-repair-mcp",
+  "description": "Pay-per-call MCP server: deterministic JSON repair + JSON Schema validation/coercion, settled in USDC on Base via x402. Fix malformed LLM/tool JSON (trailing commas, single quotes, unquoted keys, Python literals, code fences, truncation) and optionally validate/coerce against a JSON Schema.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/ktcod/x402-json-repair-mcp",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://x402.agentfund.net/mcp"
+    }
+  ]
+}

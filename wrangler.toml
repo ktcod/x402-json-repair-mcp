@@ -1,0 +1,30 @@
+# Cloudflare Workers config for x402-json-repair-mcp.
+#
+# Two deployments from one codebase:
+#   - default  (sandbox / Base Sepolia testnet):  wrangler deploy
+#   - production (Base mainnet, Coinbase CDP):     wrangler deploy --env production
+#
+# Secrets are NEVER stored here. Set them with `wrangler secret put <NAME>`:
+#   PAYOUT_WALLET_ADDRESS   (public 0x address — required)
+#   CDP_API_KEY_ID          (production only)
+#   CDP_API_KEY_SECRET      (production only)
+
+name = "x402-json-repair-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ---- Sandbox (default) : Base Sepolia testnet, public x402 facilitator ----
+[vars]
+X402_MODE = "sandbox"
+X402_NETWORK = "eip155:84532"
+X402_FACILITATOR_URL = "https://x402.org/facilitator"
+
+# ---- Production : Base mainnet, Coinbase CDP facilitator ----
+[env.production]
+name = "x402-json-repair-mcp-prod"
+
+[env.production.vars]
+X402_MODE = "production"
+X402_NETWORK = "eip155:8453"
+X402_USE_CDP_FACILITATOR = "true"

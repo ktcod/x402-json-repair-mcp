@@ -1,0 +1,31 @@
+# Copy to `.dev.vars` for local `wrangler dev` (or use a real shell env for `npm run dev:node`).
+# `.dev.vars` is gitignored. NEVER commit real values.
+#
+# ───────────────────────────────────────────────────────────────────────────
+# SECURITY: This file holds ONLY a PUBLIC wallet ADDRESS.
+# NEVER put a private key, seed phrase, or mnemonic here or anywhere in this repo.
+# The server reads the payout ADDRESS to tell payers where to send USDC. It never
+# signs or moves funds, so it never needs a private key.
+# ───────────────────────────────────────────────────────────────────────────
+
+# Required: your public USDC payout address on Base (0x + 40 hex chars).
+PAYOUT_WALLET_ADDRESS=0x0000000000000000000000000000000000000000
+
+# sandbox | production  (defaults to sandbox)
+X402_MODE=sandbox
+
+# eip155:84532 = Base Sepolia (testnet)   |   eip155:8453 = Base (mainnet)
+X402_NETWORK=eip155:84532
+
+# Facilitator that verifies + settles payments.
+# The public facilitator below works for Base Sepolia (testnet). For Base mainnet,
+# leave this unset and use the Coinbase CDP facilitator settings further down.
+X402_FACILITATOR_URL=https://x402.org/facilitator
+
+# ── Mainnet only: Coinbase CDP facilitator (https://portal.cdp.coinbase.com) ──
+# X402_USE_CDP_FACILITATOR=true
+# CDP_API_KEY_ID=your-cdp-api-key-id
+# CDP_API_KEY_SECRET=your-cdp-api-key-secret
+
+# ── Optional: per-tool price override in USD (defaults to the tool's built-in price) ──
+# PRICE_STRUCTURED_JSON_REPAIR=$0.01
