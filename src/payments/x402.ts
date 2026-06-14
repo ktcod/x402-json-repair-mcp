@@ -1,39 +1,25 @@
-import { Context } from "hono";
+import type { Context } from "hono";
+import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import {
-  x402ResourceServer,
-  x402HTTPResourceServer,
-  HTTPFacilitatorClient,
-} from "@x402/core/server";
+  decodePaymentSignatureHeader,
+  encodePaymentRequiredHeader,
+  encodePaymentResponseHeader,
+} from "@x402/core/http";
+import type { FacilitatorConfig } from "@x402/core/server";
 import type {
-  HTTPAdapter,
-  HTTPRequestContext,
-  HTTPProcessResult,
-  HTTPResponseInstructions,
-  ProcessSettleResultResponse,
-  RouteConfig,
-  RoutesConfig,
-  FacilitatorConfig,
-} from "@x402/core/server";
-import type { Network, PaymentPayload, PaymentRequirements } from "@x402/core/types";
+  Network,
+  PaymentPayload,
+  PaymentRequirements,
+  PaymentRequired,
+  ResourceInfo,
+  VerifyResponse,
+  SettleResponse,
+} from "@x402/core/types";
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
 import type { AppConfig } from "../config.js";
 import type { PaidToolSpec } from "../tools/index.js";
 
-/**
- * The subset of x402HTTPResourceServer we depend on. Declaring it as an interface
- * lets unit tests inject a fake processor with no network or facilitator.
- */
-export interface X402Processor {
-  initialize(): Promise<void>;
-  processHTTPRequest(context: HTTPRequestContext): Promise<HTTPProcessResult>;
-  processSettlement(
-    paymentPayload: PaymentPayload,
-    requirements: PaymentRequirements,
-    declaredExtensions?: Record<string, unknown>,
-  ): Promise<ProcessSettleResultResponse>;
-}
-
-/** Each paid MCP tool is mapped to a synthetic HTTP route so the x402 engine can price it. */
+/** Each paid MCP tool is exposed at a synthetic resource path for the 402 `resource` URL. */
 export function syntheticPathFor(toolName: string): string {
   return `/x402/${toolName}`;
 }
@@ -63,79 +49,32 @@ export function classifyRequest(body: unknown, isPaid: (name: string) => boolean
   return toolName ? { kind: "paid", toolName } : { kind: "free" };
 }
 
-/** Build x402 route config (one synthetic route per paid tool). */
-export function buildToolRoutes(
-  paidTools: PaidToolSpec[],
-  opts: { payTo: string; network: Network; prices: Record<string, string> },
-): RoutesConfig {
-  const routes: Record<string, RouteConfig> = {};
-  for (const tool of paidTools) {
-    routes[`POST ${syntheticPathFor(tool.name)}`] = {
-      accepts: {
-        scheme: "exact",
-        payTo: opts.payTo,
-        price: opts.prices[tool.name] ?? tool.defaultPrice,
-        network: opts.network,
-      },
-      description: tool.description,
-      mimeType: "application/json",
-      serviceName: tool.title,
-    };
-  }
-  return routes;
-}
-
-/** Hono-backed HTTP adapter. Headers come from the real request; path/url are synthetic per tool. */
-export class HonoHTTPAdapter implements HTTPAdapter {
-  constructor(
-    private readonly c: Context,
-    private readonly path: string,
-    private readonly url: string,
-  ) {}
-  getHeader(name: string): string | undefined {
-    return this.c.req.header(name);
-  }
-  getMethod(): string {
-    return "POST";
-  }
-  getPath(): string {
-    return this.path;
-  }
-  getUrl(): string {
-    return this.url;
-  }
-  // Force the JSON (API) 402 path; never the browser HTML paywall — callers are agents.
-  getAcceptHeader(): string {
-    return "application/json";
-  }
-  getUserAgent(): string {
-    return this.c.req.header("user-agent") ?? "x402-mcp-client";
-  }
-}
-
-function instructionsToResponse(instr: HTTPResponseInstructions): Response {
-  const headers = new Headers();
-  for (const [k, v] of Object.entries(instr.headers ?? {})) headers.set(k, v);
-  let body: string | null = null;
-  if (instr.body !== undefined && instr.body !== null) {
-    if (typeof instr.body === "string") {
-      body = instr.body;
-    } else {
-      body = JSON.stringify(instr.body);
-      if (!headers.has("content-type")) headers.set("content-type", "application/json");
-    }
-  }
-  return new Response(body, { status: instr.status, headers });
-}
-
-function mergeHeaders(response: Response, extra: Record<string, string>): Response {
-  const headers = new Headers(response.headers);
-  for (const [k, v] of Object.entries(extra ?? {})) headers.set(k, v);
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
+/**
+ * Minimal surface of x402ResourceServer the gate needs. We use the resource server DIRECTLY
+ * (decode the payment header → verify → settle) rather than the route-wrapper's HTTP handling,
+ * because the wrapper forwards a payment that the strict Coinbase CDP facilitator rejects.
+ * Declaring it as an interface also lets unit tests inject a fake with no network.
+ */
+export interface ResourceServerLike {
+  initialize(): Promise<void>;
+  buildPaymentRequirementsFromOptions(
+    options: Array<{
+      scheme: string;
+      payTo: string;
+      price: string;
+      network: Network;
+      maxTimeoutSeconds?: number;
+      extra?: Record<string, unknown>;
+    }>,
+    context: unknown,
+  ): Promise<PaymentRequirements[]>;
+  createPaymentRequiredResponse(
+    requirements: PaymentRequirements[],
+    resourceInfo: ResourceInfo,
+    error?: string,
+  ): Promise<PaymentRequired>;
+  verifyPayment(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse>;
+  settlePayment(payload: PaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse>;
 }
 
 function jsonResponse(status: number, payload: unknown): Response {
@@ -145,19 +84,19 @@ function jsonResponse(status: number, payload: unknown): Response {
   });
 }
 
+function requestId(body: unknown): unknown {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    return (body as { id?: unknown }).id ?? null;
+  }
+  return null;
+}
+
 function resourceUrl(c: Context, path: string): string {
   try {
     return new URL(c.req.url).origin + path;
   } catch {
     return path;
   }
-}
-
-function requestId(body: unknown): unknown {
-  if (body && typeof body === "object" && !Array.isArray(body)) {
-    return (body as { id?: unknown }).id ?? null;
-  }
-  return null;
 }
 
 /**
@@ -169,20 +108,46 @@ export class PaymentGate {
   private initPromise?: Promise<void>;
 
   constructor(
-    private readonly processor: X402Processor,
+    private readonly server: ResourceServerLike,
     private readonly paidNames: Set<string>,
+    private readonly opts: {
+      payTo: string;
+      network: Network;
+      prices: Record<string, string>;
+      specs: Map<string, PaidToolSpec>;
+    },
   ) {}
 
   readonly isPaid = (name: string): boolean => this.paidNames.has(name);
 
   private ensureInitialized(): Promise<void> {
     if (!this.initPromise) {
-      this.initPromise = this.processor.initialize().catch((e) => {
+      this.initPromise = this.server.initialize().catch((e) => {
         this.initPromise = undefined;
         throw e;
       });
     }
     return this.initPromise;
+  }
+
+  private async build402(
+    requirements: PaymentRequirements[],
+    resourceInfo: ResourceInfo,
+    error: string,
+  ): Promise<Response> {
+    const paymentRequired = await this.server.createPaymentRequiredResponse(
+      requirements,
+      resourceInfo,
+      error,
+    );
+    return new Response("{}", {
+      status: 402,
+      headers: {
+        "content-type": "application/json",
+        "payment-required": encodePaymentRequiredHeader(paymentRequired),
+        "access-control-expose-headers": "payment-required",
+      },
+    });
   }
 
   async evaluate(c: Context, body: unknown, runMcp: () => Promise<Response>): Promise<Response> {
@@ -203,6 +168,7 @@ export class PaymentGate {
       });
     }
 
+    const { toolName } = classification;
     try {
       await this.ensureInitialized();
     } catch (e) {
@@ -216,35 +182,99 @@ export class PaymentGate {
       });
     }
 
-    const path = syntheticPathFor(classification.toolName);
-    const adapter = new HonoHTTPAdapter(c, path, resourceUrl(c, path));
-    const context: HTTPRequestContext = {
-      adapter,
-      path,
-      method: "POST",
-      paymentHeader: adapter.getHeader("x-payment"),
+    const spec = this.opts.specs.get(toolName);
+    const price = this.opts.prices[toolName] ?? spec?.defaultPrice ?? "$0.01";
+    const path = syntheticPathFor(toolName);
+    // Keep the x402 `resource` lightweight: a short, ASCII, single-line description.
+    // The full tool docs live in the MCP tools/list listing (the discovery surface).
+    // The Coinbase CDP facilitator rejects payment payloads whose echoed
+    // resource.description is long / multi-line / non-ASCII.
+    const resourceInfo: ResourceInfo = {
+      url: resourceUrl(c, path),
+      description: spec?.title ?? toolName,
+      mimeType: "application/json",
+      serviceName: spec?.title,
     };
 
-    const result = await this.processor.processHTTPRequest(context);
-
-    if (result.type === "payment-error") {
-      return instructionsToResponse(result.response);
+    let requirements: PaymentRequirements[];
+    try {
+      requirements = await this.server.buildPaymentRequirementsFromOptions(
+        [{ scheme: "exact", payTo: this.opts.payTo, price, network: this.opts.network }],
+        {},
+      );
+    } catch (e) {
+      return jsonResponse(500, {
+        jsonrpc: "2.0",
+        id: requestId(body),
+        error: {
+          code: -32000,
+          message: `Could not build payment requirements: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      });
     }
-    if (result.type === "no-payment-required") {
-      return runMcp();
+    if (requirements.length === 0) {
+      return jsonResponse(500, {
+        jsonrpc: "2.0",
+        id: requestId(body),
+        error: { code: -32000, message: "No payment requirements available for this tool." },
+      });
+    }
+    const requirement = requirements[0];
+
+    const sigHeader = c.req.header("payment-signature") ?? c.req.header("x-payment");
+    if (!sigHeader) {
+      return this.build402(requirements, resourceInfo, "Payment required");
     }
 
-    // payment-verified: run the tool, then settle. If runMcp throws we never settle → no charge.
+    let payload: PaymentPayload;
+    try {
+      payload = decodePaymentSignatureHeader(sigHeader);
+    } catch {
+      return this.build402(requirements, resourceInfo, "Malformed payment header");
+    }
+
+    let verify: VerifyResponse;
+    try {
+      verify = await this.server.verifyPayment(payload, requirement);
+    } catch (e) {
+      return this.build402(
+        requirements,
+        resourceInfo,
+        `Payment verification error: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    if (!verify.isValid) {
+      return this.build402(
+        requirements,
+        resourceInfo,
+        verify.invalidReason ?? verify.invalidMessage ?? "Payment verification failed",
+      );
+    }
+
+    // Verified → run the tool, then settle. If runMcp throws we never settle → no charge.
     const mcpResponse = await runMcp();
-    const settlement = await this.processor.processSettlement(
-      result.paymentPayload,
-      result.paymentRequirements,
-      result.declaredExtensions,
-    );
-    if (settlement.success) {
-      return mergeHeaders(mcpResponse, settlement.headers);
+    let settle: SettleResponse;
+    try {
+      settle = await this.server.settlePayment(payload, requirement);
+    } catch (e) {
+      return this.build402(
+        requirements,
+        resourceInfo,
+        `Settlement error: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
-    return instructionsToResponse(settlement.response);
+    if (!settle.success) {
+      return this.build402(requirements, resourceInfo, settle.errorReason ?? "Settlement failed");
+    }
+
+    const headers = new Headers(mcpResponse.headers);
+    headers.set("payment-response", encodePaymentResponseHeader(settle));
+    headers.append("access-control-expose-headers", "payment-response");
+    return new Response(mcpResponse.body, {
+      status: mcpResponse.status,
+      statusText: mcpResponse.statusText,
+      headers,
+    });
   }
 }
 
@@ -280,26 +310,24 @@ async function resolveFacilitatorConfig(config: AppConfig): Promise<FacilitatorC
   return { url: config.facilitatorUrl };
 }
 
-/** Build the real x402 HTTP resource server (route-per-tool) backed by a facilitator. */
-export async function buildX402Processor(
-  config: AppConfig,
-  paidTools: PaidToolSpec[],
-): Promise<x402HTTPResourceServer> {
+/** Build the core x402 resource server (exact EVM scheme) backed by a facilitator. */
+export async function buildResourceServer(config: AppConfig): Promise<x402ResourceServer> {
   const facilitatorConfig = await resolveFacilitatorConfig(config);
-  const resourceServer = new x402ResourceServer(new HTTPFacilitatorClient(facilitatorConfig));
-  registerExactEvmScheme(resourceServer);
-  const routes = buildToolRoutes(paidTools, {
-    payTo: config.payTo,
-    network: config.network,
-    prices: config.prices,
-  });
-  return new x402HTTPResourceServer(resourceServer, routes);
+  const server = new x402ResourceServer(new HTTPFacilitatorClient(facilitatorConfig));
+  registerExactEvmScheme(server);
+  return server;
 }
 
 export async function buildPaymentGate(
   config: AppConfig,
   paidTools: PaidToolSpec[],
 ): Promise<PaymentGate> {
-  const processor = await buildX402Processor(config, paidTools);
-  return new PaymentGate(processor, new Set(paidTools.map((t) => t.name)));
+  const server = await buildResourceServer(config);
+  const specs = new Map(paidTools.map((t) => [t.name, t]));
+  return new PaymentGate(server, new Set(paidTools.map((t) => t.name)), {
+    payTo: config.payTo,
+    network: config.network,
+    prices: config.prices,
+    specs,
+  });
 }
