@@ -104,10 +104,8 @@ export function repairJson(input: string, schema?: Record<string, unknown>, coer
   if (schema !== undefined && schema !== null) {
     const check = validateAndCoerce(parsed, schema, coerce);
     parsed = check.data;
-    if (check.repairs.length > 0) {
-      repairs.push(...check.repairs);
-      changed = true;
-    }
+    repairs.push(...check.repairs);
+    if (check.changed) changed = true;
     if (!check.ok) {
       errors.push(...check.errors);
       return { ok: false, data: parsed, changed, errors, repairs };
