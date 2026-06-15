@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { jsonrepair } from "jsonrepair";
-import { Validator, type OutputUnit, type Schema } from "@cfworker/json-schema";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolModule } from "./types.js";
+import { coerceToSchema, validateAndCoerce } from "./schemaValidate.js";
+
+// Re-export for backward compatibility (test/structuredJsonRepair.test.ts imports it from here).
+export { coerceToSchema };
 
 export const TOOL_NAME = "structured_json_repair";
 export const TOOL_PRICE = "$0.01";
@@ -15,14 +18,8 @@ export interface RepairResult {
   repairs: string[];
 }
 
-type JsonType = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
-
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
-}
-
-function isSchemaObject(s: unknown): s is Schema {
-  return typeof s === "object" && s !== null && !Array.isArray(s);
 }
 
 /** Remove a Markdown code-fence wrapper (```json … ``` or ``` … ```), including a truncated opening fence. */
@@ -43,92 +40,6 @@ function describeSyntaxRepairs(text: string): string[] {
   if (/\b(None|True|False)\b/.test(text)) repairs.push("Converted Python literals (None/True/False) to JSON null/true/false.");
   if (/\bNaN\b|\b-?Infinity\b/.test(text)) repairs.push("Replaced non-JSON numeric literals (NaN/Infinity).");
   return repairs;
-}
-
-function jsonTypeOf(value: unknown): JsonType {
-  if (value === null) return "null";
-  if (Array.isArray(value)) return "array";
-  const t = typeof value;
-  if (t === "number") return "number";
-  if (t === "boolean") return "boolean";
-  if (t === "string") return "string";
-  return "object";
-}
-
-function coercePrimitive(value: unknown, target: JsonType): { value: unknown; changed: boolean } {
-  if (typeof value === "string") {
-    const s = value.trim();
-    if ((target === "number" || target === "integer") && s !== "" && Number.isFinite(Number(s))) {
-      const n = Number(s);
-      if (target === "integer" && !Number.isInteger(n)) return { value, changed: false };
-      return { value: n, changed: true };
-    }
-    if (target === "boolean" && /^(true|false)$/i.test(s)) {
-      return { value: s.toLowerCase() === "true", changed: true };
-    }
-  }
-  if ((typeof value === "number" || typeof value === "boolean") && target === "string") {
-    return { value: String(value), changed: true };
-  }
-  return { value, changed: false };
-}
-
-/** Coerce primitive values to match a JSON Schema's declared types. Records each change. */
-export function coerceToSchema(root: unknown, schema: Schema): { value: unknown; coercions: string[] } {
-  const coercions: string[] = [];
-
-  function walk(value: unknown, sch: unknown, path: string): unknown {
-    if (!isSchemaObject(sch)) return value;
-    const type = sch.type;
-
-    if (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      (type === "object" || (type === undefined && sch.properties))
-    ) {
-      const props = (sch.properties ?? {}) as Record<string, unknown>;
-      const obj = value as Record<string, unknown>;
-      for (const key of Object.keys(props)) {
-        if (Object.prototype.hasOwnProperty.call(obj, key)) {
-          obj[key] = walk(obj[key], props[key], `${path}/${key}`);
-        }
-      }
-      return obj;
-    }
-
-    if (Array.isArray(value) && (type === "array" || (type === undefined && sch.items))) {
-      const items = sch.items;
-      if (isSchemaObject(items)) {
-        return value.map((el, i) => walk(el, items, `${path}/${i}`));
-      }
-      return value;
-    }
-
-    const candidates: JsonType[] = Array.isArray(type)
-      ? (type as JsonType[])
-      : type
-        ? [type as JsonType]
-        : [];
-    for (const target of candidates) {
-      const result = coercePrimitive(value, target);
-      if (result.changed) {
-        coercions.push(
-          `Coerced ${path || "/"} from ${jsonTypeOf(value)} to ${target} (${JSON.stringify(value)} → ${JSON.stringify(result.value)}).`,
-        );
-        return result.value;
-      }
-    }
-    return value;
-  }
-
-  const value = walk(root, schema, "");
-  return { value, coercions };
-}
-
-function formatSchemaError(unit: OutputUnit): string {
-  const where = unit.instanceLocation && unit.instanceLocation !== "#" ? unit.instanceLocation : "/";
-  return `Schema validation failed at ${where}: ${unit.error} (${unit.keyword}).`;
 }
 
 /**
@@ -191,30 +102,14 @@ export function repairJson(input: string, schema?: Record<string, unknown>, coer
   }
 
   if (schema !== undefined && schema !== null) {
-    if (!isSchemaObject(schema)) {
-      errors.push("`schema` must be a JSON Schema object.");
-      return { ok: false, data: parsed, changed, errors, repairs };
+    const check = validateAndCoerce(parsed, schema, coerce);
+    parsed = check.data;
+    if (check.repairs.length > 0) {
+      repairs.push(...check.repairs);
+      changed = true;
     }
-    let validator: Validator;
-    try {
-      validator = new Validator(schema, "2020-12", false);
-    } catch (e) {
-      errors.push(`Invalid JSON Schema provided: ${errMessage(e)}.`);
-      return { ok: false, data: parsed, changed, errors, repairs };
-    }
-
-    if (coerce) {
-      const { value, coercions } = coerceToSchema(parsed, schema);
-      if (coercions.length > 0) {
-        parsed = value;
-        changed = true;
-        repairs.push(...coercions);
-      }
-    }
-
-    const result = validator.validate(parsed);
-    if (!result.valid) {
-      errors.push(...result.errors.map(formatSchemaError));
+    if (!check.ok) {
+      errors.push(...check.errors);
       return { ok: false, data: parsed, changed, errors, repairs };
     }
   }
