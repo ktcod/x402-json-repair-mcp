@@ -13,6 +13,14 @@ export interface ToolModule {
   description: string;
   /** USD price per call (e.g. "$0.01"). `null` = free, no x402 gate. */
   price: string | null;
+  /**
+   * Optional x402 Bazaar discovery metadata. Keep it COMPACT — it rides inside the payment
+   * payload (the Coinbase CDP facilitator catalogs it on the first settled payment).
+   */
+  discovery?: {
+    inputSchema: Record<string, unknown>;
+    output?: { example?: unknown; schema?: Record<string, unknown> };
+  };
   /** Register the tool on an MCP server instance. */
   register: (server: McpServer) => void;
 }

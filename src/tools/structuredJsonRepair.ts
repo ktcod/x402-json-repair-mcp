@@ -274,6 +274,30 @@ export const structuredJsonRepairTool: ToolModule = {
   title: "Structured JSON Repair",
   description: DESCRIPTION,
   price: TOOL_PRICE,
+  discovery: {
+    inputSchema: {
+      type: "object",
+      properties: {
+        input: { type: "string", description: "Raw/malformed JSON text to repair." },
+        schema: { type: "object", description: "Optional JSON Schema to validate/coerce against." },
+        coerce: { type: "boolean", description: "Coerce types to fit the schema (default true)." },
+      },
+      required: ["input"],
+    },
+    output: {
+      example: { ok: true, data: { name: "Ada", age: 36 }, changed: true, errors: [], repairs: [] },
+      schema: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          data: {},
+          changed: { type: "boolean" },
+          errors: { type: "array" },
+          repairs: { type: "array" },
+        },
+      },
+    },
+  },
   register(server: McpServer) {
     server.registerTool(
       TOOL_NAME,

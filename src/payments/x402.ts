@@ -16,6 +16,7 @@ import type {
   SettleResponse,
 } from "@x402/core/types";
 import { registerExactEvmScheme } from "@x402/evm/exact/server";
+import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import type { AppConfig } from "../config.js";
 import type { PaidToolSpec } from "../tools/index.js";
 
@@ -72,9 +73,18 @@ export interface ResourceServerLike {
     requirements: PaymentRequirements[],
     resourceInfo: ResourceInfo,
     error?: string,
+    extensions?: Record<string, unknown>,
   ): Promise<PaymentRequired>;
-  verifyPayment(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse>;
-  settlePayment(payload: PaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse>;
+  verifyPayment(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+    declaredExtensions?: Record<string, unknown>,
+  ): Promise<VerifyResponse>;
+  settlePayment(
+    payload: PaymentPayload,
+    requirements: PaymentRequirements,
+    declaredExtensions?: Record<string, unknown>,
+  ): Promise<SettleResponse>;
 }
 
 function jsonResponse(status: number, payload: unknown): Response {
@@ -102,7 +112,8 @@ function resourceUrl(c: Context, path: string): string {
 /**
  * x402 payment gate for MCP. Free JSON-RPC methods (initialize, tools/list, ping, notifications)
  * and free tools pass straight through. A paid `tools/call` is verified before the tool runs and
- * settled after, with the on-chain receipt attached to the response.
+ * settled after, with the on-chain receipt attached to the response. The x402 Bazaar discovery
+ * extension is advertised so the CDP facilitator catalogs the resource on first settlement.
  */
 export class PaymentGate {
   private initPromise?: Promise<void>;
@@ -134,11 +145,13 @@ export class PaymentGate {
     requirements: PaymentRequirements[],
     resourceInfo: ResourceInfo,
     error: string,
+    declaredExtensions?: Record<string, unknown>,
   ): Promise<Response> {
     const paymentRequired = await this.server.createPaymentRequiredResponse(
       requirements,
       resourceInfo,
       error,
+      declaredExtensions,
     );
     return new Response("{}", {
       status: 402,
@@ -196,6 +209,17 @@ export class PaymentGate {
       serviceName: spec?.title,
     };
 
+    // x402 Bazaar discovery: advertise the tool's I/O so CDP catalogs it on first settlement.
+    const declaredExtensions: Record<string, unknown> | undefined = spec?.discovery
+      ? declareDiscoveryExtension({
+          toolName,
+          description: spec.title,
+          transport: "streamable-http",
+          inputSchema: spec.discovery.inputSchema,
+          output: spec.discovery.output,
+        })
+      : undefined;
+
     let requirements: PaymentRequirements[];
     try {
       requirements = await this.server.buildPaymentRequirementsFromOptions(
@@ -223,24 +247,25 @@ export class PaymentGate {
 
     const sigHeader = c.req.header("payment-signature") ?? c.req.header("x-payment");
     if (!sigHeader) {
-      return this.build402(requirements, resourceInfo, "Payment required");
+      return this.build402(requirements, resourceInfo, "Payment required", declaredExtensions);
     }
 
     let payload: PaymentPayload;
     try {
       payload = decodePaymentSignatureHeader(sigHeader);
     } catch {
-      return this.build402(requirements, resourceInfo, "Malformed payment header");
+      return this.build402(requirements, resourceInfo, "Malformed payment header", declaredExtensions);
     }
 
     let verify: VerifyResponse;
     try {
-      verify = await this.server.verifyPayment(payload, requirement);
+      verify = await this.server.verifyPayment(payload, requirement, declaredExtensions);
     } catch (e) {
       return this.build402(
         requirements,
         resourceInfo,
         `Payment verification error: ${e instanceof Error ? e.message : String(e)}`,
+        declaredExtensions,
       );
     }
     if (!verify.isValid) {
@@ -248,6 +273,7 @@ export class PaymentGate {
         requirements,
         resourceInfo,
         verify.invalidReason ?? verify.invalidMessage ?? "Payment verification failed",
+        declaredExtensions,
       );
     }
 
@@ -255,16 +281,22 @@ export class PaymentGate {
     const mcpResponse = await runMcp();
     let settle: SettleResponse;
     try {
-      settle = await this.server.settlePayment(payload, requirement);
+      settle = await this.server.settlePayment(payload, requirement, declaredExtensions);
     } catch (e) {
       return this.build402(
         requirements,
         resourceInfo,
         `Settlement error: ${e instanceof Error ? e.message : String(e)}`,
+        declaredExtensions,
       );
     }
     if (!settle.success) {
-      return this.build402(requirements, resourceInfo, settle.errorReason ?? "Settlement failed");
+      return this.build402(
+        requirements,
+        resourceInfo,
+        settle.errorReason ?? "Settlement failed",
+        declaredExtensions,
+      );
     }
 
     const headers = new Headers(mcpResponse.headers);
@@ -310,11 +342,12 @@ async function resolveFacilitatorConfig(config: AppConfig): Promise<FacilitatorC
   return { url: config.facilitatorUrl };
 }
 
-/** Build the core x402 resource server (exact EVM scheme) backed by a facilitator. */
+/** Build the core x402 resource server (exact EVM scheme + Bazaar discovery) backed by a facilitator. */
 export async function buildResourceServer(config: AppConfig): Promise<x402ResourceServer> {
   const facilitatorConfig = await resolveFacilitatorConfig(config);
   const server = new x402ResourceServer(new HTTPFacilitatorClient(facilitatorConfig));
   registerExactEvmScheme(server);
+  server.registerExtension(bazaarResourceServerExtension);
   return server;
 }
 

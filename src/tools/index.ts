@@ -18,11 +18,18 @@ export function registerTools(server: McpServer): void {
 export interface PaidToolSpec extends ToolPriceSpec {
   title: string;
   description: string;
+  discovery?: ToolModule["discovery"];
 }
 
 /** Specs for tools that require x402 payment (price !== null). */
 export function paidToolSpecs(): PaidToolSpec[] {
   return tools
     .filter((t): t is ToolModule & { price: string } => t.price !== null)
-    .map((t) => ({ name: t.name, defaultPrice: t.price, title: t.title, description: t.description }));
+    .map((t) => ({
+      name: t.name,
+      defaultPrice: t.price,
+      title: t.title,
+      description: t.description,
+      discovery: t.discovery,
+    }));
 }
