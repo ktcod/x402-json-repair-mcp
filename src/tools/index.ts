@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ToolPriceSpec } from "../config.js";
 import type { ToolModule } from "./types.js";
 import { structuredJsonRepairTool } from "./structuredJsonRepair.js";
+import { tabularToJsonTool } from "./tabularToJson.js";
 
 export type { ToolModule } from "./types.js";
 
@@ -9,7 +10,7 @@ export type { ToolModule } from "./types.js";
  * The full tool registry. This is the ONLY file that changes when adding a tool:
  * implement a new ToolModule and append it here.
  */
-export const tools: ToolModule[] = [structuredJsonRepairTool];
+export const tools: ToolModule[] = [structuredJsonRepairTool, tabularToJsonTool];
 
 export function registerTools(server: McpServer): void {
   for (const tool of tools) tool.register(server);
