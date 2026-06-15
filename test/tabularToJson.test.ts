@@ -62,6 +62,17 @@ describe("tabularToJson — CSV", () => {
     expect(r.rows[1]).toEqual({ a: 4, b: 5, c: null });
     expect(r.repairs.join(" ")).toMatch(/Padded/i);
   });
+
+  it("truncates rows wider than the header and reports it", () => {
+    const r = tabularToJson("a,b\n1,2,3\n4,5", { hasHeader: "true" });
+    expect(r.ok).toBe(true);
+    expect(r.columns.map((c) => c.name)).toEqual(["a", "b"]);
+    expect(r.rows).toEqual([
+      { a: 1, b: 2 },
+      { a: 4, b: 5 },
+    ]);
+    expect(r.repairs.join(" ")).toMatch(/Truncated/i);
+  });
 });
 
 describe("tabularToJson — TSV", () => {

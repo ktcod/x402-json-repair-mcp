@@ -203,8 +203,6 @@ export function tabularToJson(input: string, opts: TabularOptions = {}): Tabular
     return emptyResult(format, changed, ["No rows found in the input."], repairs);
   }
 
-  const columnCount = Math.max(...grid.map((r) => r.length));
-
   const wantHeader = opts.hasHeader ?? "auto";
   let headerRow: string[] | null = null;
   let dataRows: string[][];
@@ -220,6 +218,10 @@ export function tabularToJson(input: string, opts: TabularOptions = {}): Tabular
   } else {
     dataRows = grid;
   }
+
+  // Column count = the header's width when a header defines the schema (so over-long rows are
+  // truncated to it); otherwise the widest data row, so nothing is dropped when there is no header.
+  const columnCount = headerRow ? headerRow.length : Math.max(...dataRows.map((r) => r.length));
 
   const headers = normalizeHeaders(headerRow, columnCount);
 
