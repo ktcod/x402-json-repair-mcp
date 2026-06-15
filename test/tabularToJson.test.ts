@@ -107,6 +107,9 @@ describe("inferCell", () => {
   it("preserves leading-zero identifiers as strings", () => {
     expect(inferCell("007")).toEqual({ value: "007", type: "string" });
   });
+  it("keeps integers beyond Number.MAX_SAFE_INTEGER as strings (no precision loss)", () => {
+    expect(inferCell("9999999999999999")).toEqual({ value: "9999999999999999", type: "string" });
+  });
 });
 
 describe("columnType", () => {
@@ -127,6 +130,11 @@ describe("normalizeHeaders", () => {
   });
   it("synthesizes all names when there is no header row", () => {
     expect(normalizeHeaders(null, 2)).toEqual(["column_1", "column_2"]);
+  });
+  it("produces unique keys when a synthesized name collides with an existing column", () => {
+    const out = normalizeHeaders(["a", "a_2", "a"], 3);
+    expect(new Set(out).size).toBe(3);
+    expect(out).toEqual(["a", "a_2", "a_3"]);
   });
 });
 

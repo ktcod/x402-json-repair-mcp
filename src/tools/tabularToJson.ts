@@ -99,7 +99,9 @@ export function inferCell(raw: string): Cell {
   if (/^[+-]?0\d/.test(s)) return { value: s, type: "string" };
   if (/^[+-]?\d+$/.test(s)) {
     const n = Number(s);
-    if (Number.isSafeInteger(n)) return { value: n, type: "integer" };
+    // Integers outside the safe range lose precision as JS numbers — keep them as strings
+    // rather than falling through to the float branch (which would silently mutate the value).
+    return Number.isSafeInteger(n) ? { value: n, type: "integer" } : { value: s, type: "string" };
   }
   if (/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s) && Number.isFinite(Number(s))) {
     return { value: Number(s), type: "number" };
@@ -118,19 +120,20 @@ export function columnType(types: JsonType[]): JsonType {
 }
 
 export function normalizeHeaders(headerRow: string[] | null, columnCount: number): string[] {
-  const seen = new Map<string, number>();
+  const seen = new Set<string>();
   const out: string[] = [];
   for (let i = 0; i < columnCount; i++) {
-    let name = headerRow && headerRow[i] !== undefined ? String(headerRow[i]).trim() : "";
-    if (name === "") name = `column_${i + 1}`;
-    const count = seen.get(name);
-    if (count !== undefined) {
-      const next = count + 1;
-      seen.set(name, next);
-      name = `${name}_${next}`;
-    } else {
-      seen.set(name, 1);
+    let base = headerRow && headerRow[i] !== undefined ? String(headerRow[i]).trim() : "";
+    if (base === "") base = `column_${i + 1}`;
+    // Find a name not already used. The suffix loop also skips collisions with a synthesized
+    // name that happens to match an explicit header (e.g. ["a", "a_2", "a"] -> "a_3", not "a_2").
+    let name = base;
+    let n = 1;
+    while (seen.has(name)) {
+      n += 1;
+      name = `${base}_${n}`;
     }
+    seen.add(name);
     out.push(name);
   }
   return out;
@@ -145,8 +148,9 @@ export function looksLikeHeader(firstRow: string[], dataRows: string[][]): boole
   if (!firstAllText) return false;
   // Strong signal: data rows have at least one typed (numeric/boolean) cell.
   if (dataRows.some((r) => r.some((c) => isTyped(c)))) return true;
-  // Weak signal: first row cells look like identifier names (no digits, no whitespace, reasonable length),
-  // and there is at least one data row. This catches all-string tables like name,note / Ada,"a, b\nc".
+  // Weak signal: every first-row cell looks like a label (non-empty, digit-free, <=64 chars; spaces
+  // allowed for multi-word headers) and there is >=1 data row. Catches all-string tables like
+  // name,note / Ada,"a, b\nc". A caller can override misdetection with hasHeader:"false".
   const looksLikeName = (s: string): boolean => s.trim().length > 0 && s.trim().length <= 64 && !/\d/.test(s);
   return dataRows.length > 0 && firstRow.every((c) => looksLikeName(c));
 }
@@ -384,7 +388,7 @@ export const tabularToJsonTool: ToolModule = {
         rowCount: 1,
         changed: true,
         errors: [],
-        repairs: ["Detected 'csv' format.", "Inferred column 'age' as integer."],
+        repairs: ["Detected 'csv' format.", "Treated the first row as a header (auto-detected)."],
       },
       schema: {
         type: "object",
@@ -420,6 +424,8 @@ export const tabularToJsonTool: ToolModule = {
         const result = tabularToJson(input, { format, hasHeader, inferTypes, schema });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          // TabularResult has concrete typed fields; the MCP SDK types structuredContent as a
+          // plain record, so the double cast is the intended bridge (do not "simplify" it away).
           structuredContent: result as unknown as Record<string, unknown>,
           isError: false,
         };
