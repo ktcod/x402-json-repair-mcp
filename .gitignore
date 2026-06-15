@@ -11,3 +11,6 @@ coverage/
 !.dev.vars.example
 
 .DS_Store
+
+# Local CLI tooling (mcp-publisher binary)
+.tools/
