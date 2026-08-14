@@ -7,7 +7,14 @@ import { treasuryYieldCurveTool } from "./treasuryYieldCurve.js";
 import { blsCpiTool } from "./blsCpi.js";
 import { onchainBalancesTool } from "./onchainBalances.js";
 import { onchainPortfolioTool } from "./onchainPortfolio.js";
+import { onchainCrossChainBalanceTool } from "./onchainCrossChainBalance.js";
+import { onchainOraclePriceTool } from "./onchainOraclePrice.js";
+import { onchainGasTool } from "./onchainGas.js";
 import { edgarInsiderTransactionsTool } from "./edgarInsiderTransactions.js";
+import { edgarFinancialsTool } from "./edgarFinancials.js";
+import { edgar13fHoldingsTool } from "./edgar13fHoldings.js";
+import { edgarFilingsFeedTool } from "./edgarFilingsFeed.js";
+import { edgarFullTextSearchTool } from "./edgarFullTextSearch.js";
 import { macroReleaseCalendarTool } from "./macroReleaseCalendar.js";
 import { macroJobsTool } from "./macroJobs.js";
 
@@ -33,9 +40,16 @@ export const tools: ToolModule[] = [
   macroReleaseCalendarTool,
   // SEC filings
   edgarInsiderTransactionsTool,
+  edgarFinancialsTool,
+  edgar13fHoldingsTool,
+  edgarFilingsFeedTool,
+  edgarFullTextSearchTool,
   // on-chain
   onchainBalancesTool,
   onchainPortfolioTool,
+  onchainCrossChainBalanceTool,
+  onchainOraclePriceTool,
+  onchainGasTool,
 ];
 
 export function registerTools(server: McpServer): void {
