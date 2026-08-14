@@ -17,6 +17,11 @@ import { edgarFilingsFeedTool } from "./edgarFilingsFeed.js";
 import { edgarFullTextSearchTool } from "./edgarFullTextSearch.js";
 import { macroReleaseCalendarTool } from "./macroReleaseCalendar.js";
 import { macroJobsTool } from "./macroJobs.js";
+import { macroPceTool } from "./macroPce.js";
+import { macroGdpTool } from "./macroGdp.js";
+import { macroRetailSalesTool } from "./macroRetailSales.js";
+import { macroHousingTool } from "./macroHousing.js";
+import { macroEnergyTool } from "./macroEnergy.js";
 
 export type { ToolModule } from "./types.js";
 
@@ -37,6 +42,11 @@ export const tools: ToolModule[] = [
   treasuryYieldCurveTool,
   blsCpiTool,
   macroJobsTool,
+  macroPceTool,
+  macroGdpTool,
+  macroRetailSalesTool,
+  macroHousingTool,
+  macroEnergyTool,
   macroReleaseCalendarTool,
   // SEC filings
   edgarInsiderTransactionsTool,
