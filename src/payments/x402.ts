@@ -110,6 +110,48 @@ function resourceUrl(c: Context, path: string): string {
 }
 
 /**
+ * True when an MCP tool-call response reports a failure, so payment must NOT be settled.
+ *
+ * Detects both a JSON-RPC `error` and a tool result with `isError: true`, over either the
+ * `application/json` or `text/event-stream` (SSE) transport. Inspects a CLONE so the original
+ * body is left intact for the caller. If the body cannot be inspected we return false and let
+ * normal settlement proceed, rather than silently giving work away.
+ */
+export async function isErroredToolResult(res: Response): Promise<boolean> {
+  if (!res.body) return false;
+  let text: string;
+  try {
+    text = await res.clone().text();
+  } catch {
+    return false;
+  }
+  if (!text) return false;
+
+  // SSE frames arrive as one or more `data: {...}` lines; plain JSON is a single document.
+  const frames = text.includes("data:")
+    ? text
+        .split(/\r?\n/)
+        .filter((l) => l.trim().startsWith("data:"))
+        .map((l) => l.trim().slice(5).trim())
+    : [text];
+
+  for (const frame of frames) {
+    try {
+      const parsed = JSON.parse(frame) as {
+        error?: unknown;
+        result?: { isError?: unknown };
+      };
+      if (parsed.error !== undefined && parsed.error !== null) return true;
+      if (parsed.result?.isError === true) return true;
+    } catch {
+      // Not parseable as JSON: fall back to a conservative textual check.
+      if (/"isError"\s*:\s*true/.test(frame)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * x402 payment gate for MCP. Free JSON-RPC methods (initialize, tools/list, ping, notifications)
  * and free tools pass straight through. A paid `tools/call` is verified before the tool runs and
  * settled after, with the on-chain receipt attached to the response. The x402 Bazaar discovery
@@ -279,6 +321,16 @@ export class PaymentGate {
 
     // Verified → run the tool, then settle. If runMcp throws we never settle → no charge.
     const mcpResponse = await runMcp();
+
+    // ...but `runMcp()` resolving is NOT proof the tool succeeded: the MCP SDK converts a
+    // thrown tool error into a *successful* HTTP response carrying `isError: true`. Pure
+    // compute tools rarely fail, but network-backed tools (Treasury, BLS, on-chain RPC) fail
+    // routinely on upstream 4xx/5xx, rate limits and timeouts. Settling those would charge the
+    // caller for a result we never delivered, so return the error unsettled instead.
+    if (await isErroredToolResult(mcpResponse)) {
+      return mcpResponse;
+    }
+
     let settle: SettleResponse;
     try {
       settle = await this.server.settlePayment(payload, requirement, declaredExtensions);
