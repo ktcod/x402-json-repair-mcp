@@ -3,14 +3,40 @@ import type { ToolPriceSpec } from "../config.js";
 import type { ToolModule } from "./types.js";
 import { structuredJsonRepairTool } from "./structuredJsonRepair.js";
 import { tabularToJsonTool } from "./tabularToJson.js";
+import { treasuryYieldCurveTool } from "./treasuryYieldCurve.js";
+import { blsCpiTool } from "./blsCpi.js";
+import { onchainBalancesTool } from "./onchainBalances.js";
+import { onchainPortfolioTool } from "./onchainPortfolio.js";
+import { edgarInsiderTransactionsTool } from "./edgarInsiderTransactions.js";
+import { macroReleaseCalendarTool } from "./macroReleaseCalendar.js";
+import { macroJobsTool } from "./macroJobs.js";
 
 export type { ToolModule } from "./types.js";
 
 /**
  * The full tool registry. This is the ONLY file that changes when adding a tool:
  * implement a new ToolModule and append it here.
+ *
+ * Two families live here now:
+ *  - pure compute (JSON repair, tabular parsing): no network, cannot fail upstream.
+ *  - network-backed data (Treasury, BLS, on-chain RPC): fetches a public source and MUST throw
+ *    on upstream failure so the payment gate skips settlement. See upstream/http.ts.
  */
-export const tools: ToolModule[] = [structuredJsonRepairTool, tabularToJsonTool];
+export const tools: ToolModule[] = [
+  // pure compute
+  structuredJsonRepairTool,
+  tabularToJsonTool,
+  // macro / government data
+  treasuryYieldCurveTool,
+  blsCpiTool,
+  macroJobsTool,
+  macroReleaseCalendarTool,
+  // SEC filings
+  edgarInsiderTransactionsTool,
+  // on-chain
+  onchainBalancesTool,
+  onchainPortfolioTool,
+];
 
 export function registerTools(server: McpServer): void {
   for (const tool of tools) tool.register(server);
