@@ -22,7 +22,7 @@ import {
   type Env,
   type ToolPriceSpec,
 } from "./config.js";
-import { buildPaymentGate, type PaymentGate } from "./payments/x402.js";
+import { buildPaymentGate, classifyRequest, type PaymentGate } from "./payments/x402.js";
 import { buildSnapshot, renderMonitorHtml } from "./monitor.js";
 import { SKILL_MD, VERIFICATION_MD } from "./docs.generated.js";
 
@@ -32,6 +32,8 @@ const PRICE_SPECS: ToolPriceSpec[] = PAID_SPECS.map((s) => ({
   defaultPrice: s.defaultPrice,
 }));
 const PAID_BY_NAME = new Map(PAID_SPECS.map((s) => [s.name, s]));
+/** Which tools cost money — static, so free methods can be answered without loading config. */
+const isPaidTool = (name: string): boolean => PAID_BY_NAME.has(name);
 
 // One gate per distinct config (a Worker isolate / Node process serves one deployment).
 let gateCache: { sig: string; gate: Promise<PaymentGate> } | undefined;
@@ -460,6 +462,14 @@ app.post("/mcp", async (c) => {
     body = await c.req.json();
   } catch {
     return c.json(rpcError(null, -32700, "Parse error: request body is not valid JSON."), 400);
+  }
+
+  // Discovery must not depend on payment configuration. `initialize`, `tools/list` and `ping`
+  // take no money, so requiring PAYOUT_WALLET_ADDRESS to answer them would make the server
+  // un-introspectable wherever payment isn't configured — a fresh clone, a CI sandbox, or a
+  // directory's automated check. Only a paid tools/call needs the gate.
+  if (classifyRequest(body, isPaidTool).kind === "free") {
+    return handleMcpRequest(c, body);
   }
 
   let config: AppConfig;
