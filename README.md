@@ -1,215 +1,120 @@
-# x402-json-repair-mcp
+# US Economic, SEC EDGAR & On-Chain Data — a pay-per-call MCP server
 
-A small, autonomous, **pay-per-call MCP server** that AI agents discover and pay for per call, with revenue landing directly in a USDC wallet on **Base** via the [x402](https://x402.org) payment protocol.
+21 data tools that AI agents discover and pay for **per call**, settled in USDC on **Base** via the
+[x402](https://x402.org) payment protocol. No account, no API key, no subscription.
 
-- **One pure-logic tool today:** `structured_json_repair` — deterministic JSON repair + JSON Schema validation/coercion. No model or paid API on the hot path, so each call costs ~nothing to serve (~100% margin).
-- **Tool-agnostic core:** the MCP + payment + deploy skeleton is separate from tool logic. Adding tool #2 is a one-file change.
-- **Cheap, serverless, near-zero maintenance:** runs on Cloudflare Workers (Node fallback included). Stateless. Holds **no private keys** — only a public payout address.
+**Live:** <https://x402.agentfund.net> · [Agent guide](https://x402.agentfund.net/SKILL.md) ·
+[Verification ledger](https://x402.agentfund.net/VERIFICATION.md) ·
+[Settlements](https://x402.agentfund.net/monitor)
 
----
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /mcp` | MCP over streamable-HTTP (stateless) |
+| `POST /x402/<tool>` | One HTTP route per tool; arguments as a plain JSON body |
+| `GET /openapi.json` | OpenAPI 3.1 discovery document with `x-payment-info` per route |
+| `GET /SKILL.md` | Agent-facing usage guide |
+| `GET /VERIFICATION.md` | How each tool was verified, and the upstream traps found |
+| `GET /monitor` | Live on-chain settlement dashboard |
+| `GET /health` | Liveness and configuration mode |
 
-## What it does
+## The tools
 
-`structured_json_repair` takes a messy/invalid JSON-ish string (the kind LLMs and tools frequently emit) plus an optional JSON Schema, and returns clean, valid, schema-conformant JSON — with structured diagnostics when it can't fully fix it.
+**US macro** — `treasury_yield_curve`, `bls_cpi`, `macro_pce`, `macro_jobs`, `macro_gdp`,
+`macro_retail_sales`, `macro_housing`, `macro_energy`, `macro_release_calendar`
 
-**Fixes:** trailing commas, single-quoted strings, unquoted keys, Python literals (`None`/`True`/`False`), `NaN`/`Infinity`, Markdown ```` ``` ```` code-fence wrappers, and truncated/garbled tails. With a schema, it validates (JSON Schema draft 2020-12) and optionally coerces primitives (`"36"` → `36`, `"true"` → `true`).
+**SEC EDGAR** — `edgar_filings_feed`, `edgar_financials`, `edgar_insider_transactions`,
+`edgar_13f_holdings`, `edgar_full_text_search`
 
-**Input** (`tools/call` arguments):
+**On-chain EVM** — `onchain_token_balances`, `onchain_portfolio`, `onchain_cross_chain_balances`,
+`onchain_oracle_price`, `onchain_gas`
 
-| field | type | required | default | description |
-|-------|------|----------|---------|-------------|
-| `input` | string | ✅ | — | The raw/malformed JSON text. |
-| `schema` | object | — | — | JSON Schema (draft 2020-12) to validate/coerce against. |
-| `coerce` | boolean | — | `true` | Coerce primitive types to satisfy the schema. |
+**Pure compute** — `structured_json_repair`, `tabular_to_json`
 
-**Output** (`structuredContent`):
+Prices run **$0.001–$0.03** per call.
 
-```jsonc
-{
-  "ok": true,                 // valid JSON (and schema-valid when a schema was given)
-  "data": { "...": "..." },   // the repaired/validated value; null if unfixable
-  "changed": true,            // true if any repair or coercion modified the input
-  "errors": [],               // actionable messages when ok is false
-  "repairs": ["Removed trailing comma(s) before a closing } or ]."]
-}
-```
+## Why these sources
 
-Annotations: `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: false`.
+Every tool wraps **free public-domain US government data** (Treasury, BLS, BEA, Census, EIA, SEC
+EDGAR) or a **direct on-chain read** via public RPC. There is no upstream vendor licence, so
+nothing here can be revoked or repriced by a third party, and the cost of goods is zero.
 
----
+The trade-off is inherited from the publishers: government statistics are **lagged and revised**,
+13F is quarterly and stale by design, and none of this is market data. Those limits are stated
+plainly in [SKILL.md](SKILL.md) rather than buried.
 
-## Pricing
+## Correctness
 
-| Tool | Price | Network | Asset |
-|------|-------|---------|-------|
-| `structured_json_repair` | **$0.01 / call** | Base (mainnet) / Base Sepolia (sandbox) | USDC |
+Every tool was checked against **live upstream data** before shipping — not only against unit
+tests, because a test written from the same wrong assumption as the code passes happily.
 
-Discovery is free: `initialize`, `tools/list`, and `ping` are never charged — only a `tools/call` to a paid tool is.
+That caught six real defects, including 13F values being 1000× too large by following SEC's *own*
+documentation, and Census silently returning five regional rows where a national figure was
+expected. Each is documented with the evidence that exposed it, and locked in by a regression
+test: **[VERIFICATION.md](VERIFICATION.md)**.
 
----
+**A failed call is never billed.** The MCP SDK turns a thrown tool error into an HTTP 200 carrying
+`isError: true`; the payment gate inspects the result and returns errors **unsettled** rather than
+charging for a result the caller never received.
 
-## How it works
+## Architecture
 
-```
-agent (x402-enabled MCP client)
-        │  POST /mcp  (JSON-RPC: tools/call structured_json_repair)
-        ▼
-┌─────────────────────────── Hono app (Workers / Node) ───────────────────────────┐
-│  PaymentGate.evaluate()                                                          │
-│   • initialize / tools/list / ping / free tools ─────────────► run MCP, return   │
-│   • paid tools/call:                                                             │
-│        no/invalid payment ─► HTTP 402 + x402 "payment-required" envelope         │
-│        valid payment      ─► run MCP tool ─► settle ─► result + receipt header   │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
+- **x402 v2** (`@x402/core`, `@x402/evm`) with the Coinbase CDP facilitator on Base mainnet.
+- **MCP on Workers** via `@hono/mcp` `StreamableHTTPTransport` (the SDK's own transport is
+  Node-`http`-based). Stateless JSON.
+- **Two entry points, one payment path.** `/mcp` and `/x402/<tool>` both run through
+  `PaymentGate.chargeAndRun`, so money-safety rules cannot drift between them.
+- **Per-tool HTTP routes exist for discovery.** The x402 Bazaar indexes plain HTTP resources only
+  — every catalog entry is `type: "http"` — so an MCP endpoint alone can never be listed.
+- **Discovery needs no secrets.** `initialize`, `tools/list` and `ping` are answered without
+  payment configuration, so the server introspects cleanly on a fresh clone or in a CI sandbox.
+- **Validation uses `@cfworker/json-schema`, not Ajv** — Ajv compiles via `Function`, which
+  Workers forbid, and the schema is a runtime input so it cannot be precompiled.
+- **No private keys.** The server holds only a public payout address; `config.ts` refuses
+  private-key- or seed-shaped input.
 
-Because every MCP call hits a single `/mcp` endpoint, the gate inspects the JSON-RPC `method`/tool name and maps each paid tool to a **synthetic x402 route** (`POST /x402/<tool>`). The official x402 engine (`@x402/core` + `@x402/evm`) then handles price→atomic conversion, USDC asset resolution, the 402 envelope, facilitator verification, and on-chain settlement. Payment lives entirely at the HTTP layer and is transparent to JSON-RPC.
+Adding a tool is a one-file change plus a line in `src/tools/index.ts`.
 
-A real unpaid call returns (verified against the public testnet facilitator):
-
-```
-HTTP/1.1 402 Payment Required
-payment-required: <base64 x402 v2 envelope>
-```
-```jsonc
-// decoded envelope
-{ "x402Version": 2,
-  "resource": { "url": ".../x402/structured_json_repair", ... },
-  "accepts": [{ "scheme": "exact", "network": "eip155:84532",
-                "amount": "10000", "asset": "0x036CbD…CF7e" /* USDC on Base Sepolia */,
-                "payTo": "0x…", "maxTimeoutSeconds": 300,
-                "extra": { "name": "USDC", "version": "2" } }] }
-```
-
----
-
-## Quick start (local sandbox / testnet)
+## Development
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars      # then set PAYOUT_WALLET_ADDRESS (a PUBLIC 0x address)
-npm run build
-PAYOUT_WALLET_ADDRESS=0xYourPublicAddress npm start   # Node server on :8787
-# or: npm run dev        (Cloudflare Workers dev server via wrangler)
+npm test          # 174 tests
+npm run typecheck
+npm run dev       # wrangler dev
+npm run dev:node  # tsx watch src/node.ts
 ```
 
-Exercise it (no payment needed for discovery; the paid call returns 402):
+Copy `.dev.vars.example` to `.dev.vars` for local configuration. Only the **public** payout
+address is ever needed — never a private key or seed phrase.
+
+Docs are mirrored into the bundle (Workers have no filesystem); run `npm run gen:docs` after
+editing `SKILL.md` or `VERIFICATION.md`, or `test/docs.test.ts` will fail on the drift.
+
+## Deployment
+
+Production runs on **Cloudflare Workers**. Secrets are set with `wrangler secret put`, never in
+`wrangler.toml`:
 
 ```bash
-# tools/list — free
-curl -s -X POST http://localhost:8787/mcp \
-  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-
-# paid tool, unpaid — returns HTTP 402 with the x402 envelope in the `payment-required` header
-curl -i -s -X POST http://localhost:8787/mcp \
-  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call",
-       "params":{"name":"structured_json_repair","arguments":{"input":"{a:1,}"}}}'
+npx wrangler deploy --env production
 ```
 
-Inspect interactively with the MCP Inspector:
+A `Dockerfile` is included for self-hosting the Node entrypoint; it needs no secrets, so the
+container starts and passes introspection out of the box. See
+[OPERATOR_CHECKLIST.md](OPERATOR_CHECKLIST.md) for the full runbook.
+
+## Buyer-side test clients
 
 ```bash
-npm run inspector      # then connect to Streamable HTTP at http://localhost:8787/mcp
+PAYER_PRIVATE_KEY=0x… node scripts/pay-test.mjs      # pay via /mcp
+PAYER_PRIVATE_KEY=0x… node scripts/pay-http.mjs      # pay via /x402/<tool>
+node scripts/index-all.mjs                            # dry run: Bazaar index status
 ```
 
-### Sample agent call
+Payment is **gasless for the payer** (the facilitator submits the transaction), so a test wallet
+needs USDC and no ETH. `index-all.mjs` skips already-indexed routes and refuses to spend without
+`--yes`.
 
-An x402-enabled MCP client pays automatically: it calls the tool, receives the 402, signs a USDC payment from its own wallet, and retries with the payment header — all transparently. With the x402 SDK (`@x402/*` + a wallet), wrap the HTTP transport so 402s are auto-paid, then use the standard MCP client against `https://<host>/mcp`. See the x402 client docs: <https://docs.x402.org>.
+## Licence
 
----
-
-## Project layout
-
-```
-src/
-  index.ts            # Hono app: routes, x402 gate wiring, Workers entry (default export)
-  node.ts             # Node/VPS entry (npm start / bin)
-  config.ts           # env loading + validation (address-only; refuses private keys)
-  mcp/
-    server.ts         # MCP server factory; registers tools (tool-agnostic core)
-    transport.ts      # stateless Streamable HTTP via @hono/mcp
-  tools/
-    structuredJsonRepair.ts   # pure tool logic + Zod input/output schemas + registration
-    index.ts          # tool registry — add new tools here
-    types.ts          # ToolModule contract
-  payments/
-    x402.ts           # paywall: per-tool routes, facilitator, verify/settle, JSON-RPC gating
-test/
-  structuredJsonRepair.test.ts
-  paywall.test.ts
-server.json           # Official MCP Registry metadata
-wrangler.toml         # Cloudflare Workers config (sandbox + production envs)
-.dev.vars.example     # example env (placeholders only — no secrets)
-```
-
-### Adding a tool (tool-agnostic core)
-
-1. Create `src/tools/myTool.ts` exporting a `ToolModule` (`name`, `title`, `description`, `price`, `register`). Set `price: null` for a free tool or `"$0.05"` for a paid one.
-2. Append it to the array in `src/tools/index.ts`. That's the only change — the MCP, payment, and deploy layers pick it up automatically (the gate prices every tool whose `price !== null`).
-
----
-
-## Configuration
-
-All config comes from environment variables (Workers `[vars]` / `wrangler secret`, or the process env on Node).
-
-| Variable | Required | Default | Notes |
-|----------|----------|---------|-------|
-| `PAYOUT_WALLET_ADDRESS` | ✅ | — | **Public** USDC payout address (`0x` + 40 hex). Never a private key. |
-| `X402_MODE` | — | `sandbox` | `sandbox` (testnet) or `production` (mainnet). |
-| `X402_NETWORK` | — | by mode | `eip155:84532` (Base Sepolia) or `eip155:8453` (Base). |
-| `X402_FACILITATOR_URL` | — | `https://x402.org/facilitator` | Public facilitator (works for testnet). |
-| `X402_USE_CDP_FACILITATOR` | — | `false` | `true` for the Coinbase CDP facilitator (mainnet). |
-| `CDP_API_KEY_ID` / `CDP_API_KEY_SECRET` | prod only | — | CDP facilitator credentials (set as secrets). |
-| `PRICE_STRUCTURED_JSON_REPAIR` | — | `$0.01` | Per-tool price override (USD). |
-
----
-
-## Deploy
-
-See **[OPERATOR_CHECKLIST.md](./OPERATOR_CHECKLIST.md)** for the exact human-only steps (wallet, accounts, secrets, deploy, publish). In short:
-
-```bash
-# Sandbox (Base Sepolia, public facilitator)
-wrangler secret put PAYOUT_WALLET_ADDRESS
-wrangler deploy                       # → https://x402-json-repair-mcp.<subdomain>.workers.dev/mcp
-
-# Production (Base mainnet, Coinbase CDP facilitator)
-wrangler secret put PAYOUT_WALLET_ADDRESS --env production
-wrangler secret put CDP_API_KEY_ID --env production
-wrangler secret put CDP_API_KEY_SECRET --env production
-wrangler deploy --env production
-```
-
-**Node / VPS fallback:** `npm run build && PAYOUT_WALLET_ADDRESS=0x… npm start` (serves `/mcp` on `:8787`; put it behind TLS).
-
-## Listing & discovery
-
-- **Official MCP Registry:** edit `server.json` (set your `OWNER` namespace and the deployed URL), then publish with the registry `mcp-publisher` CLI. The registry feeds Smithery, PulseMCP, etc.
-- **x402 Bazaar / Agentic.market:** the server serves machine-readable discovery at `GET /.well-known/x402` (capability + pricing per tool). Submit per current x402 docs.
-- **npm:** `npm publish` (the package is runnable via `npx x402-json-repair-mcp` for self-hosting).
-
-Operator-run commands are in **[OPERATOR_CHECKLIST.md](./OPERATOR_CHECKLIST.md)**.
-
----
-
-## Security
-
-- **Address only — never a private key.** The server reads `PAYOUT_WALLET_ADDRESS` to tell payers where to send USDC; it never signs or moves funds. `config.ts` actively **refuses** anything shaped like a private key (64 hex) or seed phrase.
-- **No secrets in source.** Use `.dev.vars` locally (gitignored) and `wrangler secret` in production. Only `.dev.vars.example` (placeholders) is committed.
-- **Stateless.** Request payloads aren't persisted beyond serving the response.
-
-## Engineering notes
-
-- **x402 v2.** Uses the maintained `@x402/core` / `@x402/evm` packages (the v1 `x402`/`x402-hono` packages are deprecated). The 402 envelope is delivered in the `payment-required` response header (v2), which the agent's x402 client reads and pays.
-- **Validation uses `@cfworker/json-schema`, not Ajv.** Ajv compiles validators at runtime via the `Function` constructor, which Cloudflare Workers forbid (no `eval`). Since the schema is a *runtime* input, it can't be precompiled — so we use the eval-free, Workers-native `@cfworker/json-schema` (already an MCP SDK peer) plus a small schema-driven coercion pass.
-
-## Roadmap
-
-- **Phase 2 — vertical document parser (planned, not built):** a tool for one document type that general parsers handle poorly (e.g. a specific statement/invoice/receipt format), priced toward the work-done end ($0.05–$0.10/call). It would slot in as another `ToolModule` with no changes to the MCP/payment/deploy core.
-
-## License
-
-MIT
+MIT (declared in `package.json`; no `LICENSE` file has been added yet).
