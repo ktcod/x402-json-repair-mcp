@@ -1,16 +1,41 @@
 # Conformance results
 
-Last run: **not yet run against production**
+Last run: **2026-08-15** against `https://x402.agentfund.net`
 
-The suite is implemented and unit-tested (`src/conformance/checks.ts`, 27 tests), but no paid run
-against the live endpoints has been published yet. Until one has, treat this page as a statement
-of intent rather than evidence — an unverified conformance claim is worth nothing.
+**21 passed, 1 failed, 0 skipped.**
 
-Reproduce with `npm run conformance -- --run`, or point the suite at any other x402 provider with
-`--base`. A full pass costs about $0.055 in real settlements.
+These are live results from paid calls against the production endpoints — not a self-test against
+fixtures. Reproduce them with `npm run conformance -- --run`, or point the suite at any other
+x402 provider with `--base`.
 
 What the checks catch, and why they can run against a provider we did not build, is described in
-[VERIFICATION.md](VERIFICATION.md).
+[VERIFICATION.md](VERIFICATION.md). A `skip` means the check could not be judged fairly on this
+response — it is never a quiet failure.
+
+| Check | Result | Detail |
+| --- | --- | --- |
+| `holdings-value-scale` | pass | 10 positions, implied prices plausible |
+| `series-not-empty` | pass | 13F holdings: 10 observation(s) |
+| `finite-numbers` | pass | 13F: all numeric fields finite |
+| `units-declared` | pass | as-of date and units both present |
+| `freshness` | pass | 13F period: 2026-06-30 (46d old, limit 200d) |
+| `national-not-regional` | pass | housing starts: 1427 within the national range |
+| `national-not-regional` | pass | building permits: 1374 within the national range |
+| `finite-numbers` | pass | housing: all numeric fields finite |
+| `units-declared` | pass | as-of date and units both present |
+| `freshness` | pass | housing: 2026-06 (75d old, limit 120d) |
+| `national-not-regional` | pass | retail sales: 763602 within the national range |
+| `derived-completeness` | pass | retail yoyPercent: present (5) |
+| `finite-numbers` | pass | retail: all numeric fields finite |
+| `units-declared` | pass | as-of date and units both present |
+| `freshness` | pass | retail: 2026-07 (45d old, limit 120d) |
+| `series-not-empty` | pass | PCE headline: 1 observation(s) |
+| `series-not-empty` | pass | PCE core: 1 observation(s) |
+| `finite-numbers` | pass | PCE: all numeric fields finite |
+| `units-declared` | pass | as-of date and units both present |
+| `freshness` | pass | PCE: 2026-06 (75d old, limit 120d) |
+| `finite-numbers` | pass | portfolio: all numeric fields finite |
+| `units-declared` | **FAIL** | no as-of date and no unit anywhere in the payload |
 
 ---
 

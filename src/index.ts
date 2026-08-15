@@ -349,20 +349,21 @@ const FAVICON_ICO_BASE64 =
  * checking each tool against live data, including one where the publisher's own documentation is
  * wrong; it is the substantive trust signal, so it must stay reachable at a stable URL.
  */
-const markdown = (body: string) =>
+const markdown = (body: string, maxAge = 3600) =>
   new Response(body, {
     status: 200,
     headers: {
       "content-type": "text/markdown; charset=utf-8",
-      "cache-control": "public, max-age=3600",
+      "cache-control": `public, max-age=${maxAge}`,
     },
   });
 
 app.get("/SKILL.md", () => markdown(SKILL_MD));
 app.get("/VERIFICATION.md", () => markdown(VERIFICATION_MD));
 // Dated results from real paid runs of the conformance suite. Published because a correctness
-// claim nobody can inspect is only an assertion.
-app.get("/CONFORMANCE.md", () => markdown(CONFORMANCE_MD));
+// claim nobody can inspect is only an assertion. Cached briefly, not for an hour like the static
+// docs: the entire value of this page is that it reflects the most recent run.
+app.get("/CONFORMANCE.md", () => markdown(CONFORMANCE_MD, 300));
 
 /**
  * Live settlement monitor for the payout wallet. Free and unauthenticated: it exposes only the

@@ -99,8 +99,14 @@ const AGENTFUND_ADAPTER = [
     tool: "onchain_portfolio",
     body: { address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045" },
     checks: (r) => {
-      const out = [checkFiniteNumbers(r, "portfolio"), checkUnitsDeclared(r)];
-      for (const a of r.assets ?? []) {
+      const out = [
+        checkFiniteNumbers(r, "portfolio"),
+        checkUnitsDeclared(r),
+        checkFreshness(r.asOf, 1, "portfolio"), // on-chain reads are live; a day is generous
+      ];
+      // Field is `holdings`. An adapter naming it wrongly silently skips every per-asset check,
+      // which is exactly how a suite ends up reporting a clean pass it never actually ran.
+      for (const a of r.holdings ?? []) {
         out.push(checkDecimalsAdjusted(a.balance, a.decimals, a.symbol ?? "asset"));
       }
       return out;

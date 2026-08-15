@@ -62,6 +62,12 @@ export interface Holding {
   address: string | null;
   raw: string;
   balance: string;
+  /**
+   * Token decimals. `balance` is already adjusted by this, and `raw` is the unadjusted integer.
+   * Declared explicitly so a consumer can verify the scale rather than assume it — an
+   * unadjusted 18-decimal balance is wrong by 10^18 and looks perfectly self-consistent.
+   */
+  decimals: number;
   /** Chainlink USD price, or null when the feed could not be read. */
   priceUsd: number | null;
   /** balance * priceUsd, or null when unpriced. */
@@ -72,6 +78,11 @@ export interface PortfolioResult {
   address: string;
   chain: string;
   chainId: number;
+  /**
+   * When this snapshot was taken, ISO-8601 UTC. `blockNumber` alone tells an agent nothing about
+   * freshness without a second lookup, so the wall-clock time is reported alongside it.
+   */
+  asOf: string;
   blockNumber: number | null;
   /** Only assets with a non-zero balance appear here. */
   holdings: Holding[];
@@ -165,6 +176,7 @@ export async function getPortfolio(
       address: asset.token === "native" ? null : asset.token,
       raw: amount.toString(),
       balance,
+      decimals: asset.decimals,
       priceUsd: priceUsd === null ? null : round2(priceUsd),
       valueUsd,
     });
@@ -176,6 +188,7 @@ export async function getPortfolio(
     address: holder,
     chain,
     chainId: CHAINS[chain].id,
+    asOf: new Date().toISOString(),
     blockNumber: blockNumber === null ? null : Number(blockNumber),
     holdings,
     totalValueUsd: round2(total),
