@@ -326,6 +326,26 @@ app.get("/.well-known/x402", (c) => c.json(buildDiscovery(readEnv(c), c)));
 app.get("/openapi.json", (c) => c.json(buildOpenApi(readEnv(c), c)));
 
 /**
+ * 32x32 PNG-in-ICO: dark background, rising green bar chart.
+ *
+ * Directories (x402scan/Poncho, and the Bazaar's `iconUrl`) show an icon for origins that serve
+ * one, and most listings don't bother — it is cheap differentiation in a crowded catalog. The
+ * asset is 154 bytes, so inlining beats an asset binding or an external fetch.
+ */
+const FAVICON_ICO_BASE64 =
+  "AAABAAEAICAAAAEAIACEAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAEtJ" +
+  "REFUeNpj4BZS+D+QmGHUAaMOGHXAsHSA0tE4DDzqgFEHUN0B+CwZdcCoA6jmAHItGXXAqANGHUCxA9xD" +
+  "M2mGR9uEow4YdQA6BgC6ObvkiLD89wAAAABJRU5ErkJggg==";
+
+app.get("/favicon.ico", (c) => {
+  const bytes = Uint8Array.from(atob(FAVICON_ICO_BASE64), (ch) => ch.charCodeAt(0));
+  return c.body(bytes, 200, {
+    "content-type": "image/x-icon",
+    "cache-control": "public, max-age=86400",
+  });
+});
+
+/**
  * Per-tool x402 HTTP routes: `POST|GET /x402/<tool>`.
  *
  * These exist for DISCOVERY, not convenience. The x402 Bazaar indexes plain HTTP resources
