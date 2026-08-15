@@ -17,6 +17,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const DOCS = [
   { file: "SKILL.md", constName: "SKILL_MD" },
   { file: "VERIFICATION.md", constName: "VERIFICATION_MD" },
+  { file: "CONFORMANCE.md", constName: "CONFORMANCE_MD" },
 ];
 
 export function readDoc(file) {

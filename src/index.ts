@@ -24,7 +24,7 @@ import {
 } from "./config.js";
 import { buildPaymentGate, classifyRequest, type PaymentGate } from "./payments/x402.js";
 import { buildSnapshot, renderMonitorHtml } from "./monitor.js";
-import { SKILL_MD, VERIFICATION_MD } from "./docs.generated.js";
+import { SKILL_MD, VERIFICATION_MD, CONFORMANCE_MD } from "./docs.generated.js";
 
 const PAID_SPECS = paidToolSpecs();
 const PRICE_SPECS: ToolPriceSpec[] = PAID_SPECS.map((s) => ({
@@ -360,6 +360,9 @@ const markdown = (body: string) =>
 
 app.get("/SKILL.md", () => markdown(SKILL_MD));
 app.get("/VERIFICATION.md", () => markdown(VERIFICATION_MD));
+// Dated results from real paid runs of the conformance suite. Published because a correctness
+// claim nobody can inspect is only an assertion.
+app.get("/CONFORMANCE.md", () => markdown(CONFORMANCE_MD));
 
 /**
  * Live settlement monitor for the payout wallet. Free and unauthenticated: it exposes only the

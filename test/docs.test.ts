@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 // @ts-expect-error - plain .mjs helper, no type declarations
 import { DOCS, readDoc } from "../scripts/gen-docs.mjs";
-import { SKILL_MD, VERIFICATION_MD } from "../src/docs.generated.js";
+import { SKILL_MD, VERIFICATION_MD, CONFORMANCE_MD } from "../src/docs.generated.js";
 
 /**
  * SKILL.md and VERIFICATION.md are served from the bundle (the Worker has no filesystem), so the
@@ -10,7 +10,7 @@ import { SKILL_MD, VERIFICATION_MD } from "../src/docs.generated.js";
  * trustworthy about correctness.
  */
 describe("generated docs match their Markdown sources", () => {
-  const embedded: Record<string, string> = { SKILL_MD, VERIFICATION_MD };
+  const embedded: Record<string, string> = { SKILL_MD, VERIFICATION_MD, CONFORMANCE_MD };
 
   for (const { file, constName } of DOCS as Array<{ file: string; constName: string }>) {
     it(`${file} is in sync with ${constName} (run \`npm run gen:docs\`)`, () => {
