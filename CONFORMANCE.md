@@ -2,7 +2,7 @@
 
 Last run: **2026-08-15** against `https://x402.agentfund.net`
 
-**21 passed, 1 failed, 0 skipped.**
+**27 passed, 0 failed, 0 skipped.**
 
 These are live results from paid calls against the production endpoints — not a self-test against
 fixtures. Reproduce them with `npm run conformance -- --run`, or point the suite at any other
@@ -35,7 +35,12 @@ response — it is never a quiet failure.
 | `units-declared` | pass | as-of date and units both present |
 | `freshness` | pass | PCE: 2026-06 (75d old, limit 120d) |
 | `finite-numbers` | pass | portfolio: all numeric fields finite |
-| `units-declared` | **FAIL** | no as-of date and no unit anywhere in the payload |
+| `units-declared` | pass | as-of date and units both present |
+| `freshness` | pass | portfolio: 2026-08-15T03:57:23.674Z (0d old, limit 1d) |
+| `decimals-adjusted` | pass | ETH: 3.128598018118078 consistent with 18 decimals |
+| `decimals-adjusted` | pass | WETH: 0.20038128657412108 consistent with 18 decimals |
+| `decimals-adjusted` | pass | USDC: 30.464119 consistent with 6 decimals |
+| `decimals-adjusted` | pass | cbBTC: 0.00000325 consistent with 8 decimals |
 
 ---
 
