@@ -25,7 +25,8 @@
     "start": "node dist/node.js",
     "deploy": "wrangler deploy",
     "inspector": "npx @modelcontextprotocol/inspector",
-    "gen:docs": "node scripts/gen-docs.mjs"
+    "gen:docs": "node scripts/gen-docs.mjs",
+    "conformance": "npm run build && node scripts/conformance.mjs"
   },
   "keywords": [
     "mcp",
