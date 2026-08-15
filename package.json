@@ -24,7 +24,8 @@
     "dev:node": "tsx watch src/node.ts",
     "start": "node dist/node.js",
     "deploy": "wrangler deploy",
-    "inspector": "npx @modelcontextprotocol/inspector"
+    "inspector": "npx @modelcontextprotocol/inspector",
+    "gen:docs": "node scripts/gen-docs.mjs"
   },
   "keywords": [
     "mcp",

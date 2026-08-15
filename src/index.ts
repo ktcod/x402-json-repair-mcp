@@ -24,6 +24,7 @@ import {
 } from "./config.js";
 import { buildPaymentGate, type PaymentGate } from "./payments/x402.js";
 import { buildSnapshot, renderMonitorHtml } from "./monitor.js";
+import { SKILL_MD, VERIFICATION_MD } from "./docs.generated.js";
 
 const PAID_SPECS = paidToolSpecs();
 const PRICE_SPECS: ToolPriceSpec[] = PAID_SPECS.map((s) => ({
@@ -337,6 +338,26 @@ const FAVICON_ICO_BASE64 =
   "AAABAAEAICAAAAEAIACEAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAEtJ" +
   "REFUeNpj4BZS+D+QmGHUAaMOGHXAsHSA0tE4DDzqgFEHUN0B+CwZdcCoA6jmAHItGXXAqANGHUCxA9xD" +
   "M2mGR9uEow4YdQA6BgC6ObvkiLD89wAAAABJRU5ErkJggg==";
+
+/**
+ * Agent-facing usage guide and the data-correctness ledger, served as plain Markdown.
+ *
+ * SKILL.md is the target of the Bazaar's `skillUrl` field — unused by essentially every listing
+ * in the catalog, so it is cheap differentiation. VERIFICATION.md records upstream traps found by
+ * checking each tool against live data, including one where the publisher's own documentation is
+ * wrong; it is the substantive trust signal, so it must stay reachable at a stable URL.
+ */
+const markdown = (body: string) =>
+  new Response(body, {
+    status: 200,
+    headers: {
+      "content-type": "text/markdown; charset=utf-8",
+      "cache-control": "public, max-age=3600",
+    },
+  });
+
+app.get("/SKILL.md", () => markdown(SKILL_MD));
+app.get("/VERIFICATION.md", () => markdown(VERIFICATION_MD));
 
 /**
  * Live settlement monitor for the payout wallet. Free and unauthenticated: it exposes only the
