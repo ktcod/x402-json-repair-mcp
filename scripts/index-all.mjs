@@ -68,7 +68,11 @@ if (!todo.length) {
 }
 if (!commit) {
   console.error("\nDry run. Re-run with --yes (and PAYER_PRIVATE_KEY set) to spend.");
-  process.exit(0);
+  // Non-zero so a scheduled check can detect drift. CDP drops resources that go 30 days without
+  // a settlement, so routes silently fall out of the catalog; this is the signal to top up a
+  // throwaway wallet and re-run with --yes. Deliberately NOT automated: refreshing costs money,
+  // and automating it would mean parking a funded hot-wallet key in a scheduler.
+  process.exit(1);
 }
 
 const pk = process.env.PAYER_PRIVATE_KEY;
