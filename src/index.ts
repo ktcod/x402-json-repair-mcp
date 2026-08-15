@@ -222,6 +222,84 @@ function buildDiscovery(env: Env, c: Context) {
   };
 }
 
+/**
+ * OpenAPI 3.1 description of the per-tool x402 routes.
+ *
+ * This is the discovery contract third-party indexers (x402scan / Poncho) fetch from
+ * `/openapi.json`; they reject an origin outright with "No discovery document found" without it.
+ * Payable operations must carry `x-payment-info` and declare a 402 response.
+ *
+ * Note the units mismatch, which is intentional and required: `x-payment-info.price.amount` is
+ * DECIMAL USD ("0.005"), while the runtime x402 `accepts[].amount` is atomic token units
+ * ("5000" for USDC's 6 decimals). Both describe the same price.
+ */
+function buildOpenApi(env: Env, c: Context) {
+  const base = origin(c);
+  const paths: Record<string, unknown> = {};
+
+  for (const spec of PAID_SPECS) {
+    const usd = normalizePriceDisplay(env[priceEnvVar(spec.name)] ?? spec.defaultPrice).replace(
+      /^\$/,
+      "",
+    );
+    paths[`/x402/${spec.name}`] = {
+      post: {
+        operationId: spec.name,
+        summary: spec.title,
+        description: spec.description,
+        "x-payment-info": {
+          price: { mode: "fixed", currency: "USD", amount: usd },
+          protocols: [{ x402: {} }],
+        },
+        requestBody: {
+          required: Boolean(
+            (spec.discovery?.inputSchema as { required?: unknown[] } | undefined)?.required?.length,
+          ),
+          content: {
+            "application/json": {
+              schema: spec.discovery?.inputSchema ?? { type: "object" },
+              ...(spec.discovery?.inputExample ? { example: spec.discovery.inputExample } : {}),
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Tool result as JSON.",
+            content: {
+              "application/json": {
+                schema: spec.discovery?.output?.schema ?? { type: "object" },
+                ...(spec.discovery?.output?.example
+                  ? { example: spec.discovery.output.example }
+                  : {}),
+              },
+            },
+          },
+          "402": { description: "Payment Required" },
+        },
+      },
+    };
+  }
+
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: SERVICE_TITLE,
+      version: SERVER_VERSION,
+      description: SERVICE_DESCRIPTION,
+      contact: { email: "info@agentfund.net" },
+      "x-guidance":
+        "Each route is one tool, priced per call and settled in USDC on Base via x402. " +
+        "POST the tool's arguments as a plain JSON body; the response is the tool's result as " +
+        "JSON. An unpaid request returns 402 with the payment requirements in the " +
+        "`payment-required` header. Data comes from free public sources (US Treasury, BLS, BEA, " +
+        "Census, EIA, SEC EDGAR, and public EVM RPC), so figures carry each source's own " +
+        "publication lag and revision policy. The same tools are also callable over MCP at /mcp.",
+    },
+    servers: [{ url: base }],
+    paths,
+  };
+}
+
 export const app = new Hono();
 
 app.get("/", (c) => c.json(buildManifest(readEnv(c), c)));
@@ -243,6 +321,9 @@ app.get("/health", (c) => {
 });
 
 app.get("/.well-known/x402", (c) => c.json(buildDiscovery(readEnv(c), c)));
+
+// Discovery contract for third-party indexers; see buildOpenApi.
+app.get("/openapi.json", (c) => c.json(buildOpenApi(readEnv(c), c)));
 
 /**
  * Per-tool x402 HTTP routes: `POST|GET /x402/<tool>`.
