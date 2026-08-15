@@ -378,6 +378,7 @@ export const tabularToJsonTool: ToolModule = {
       },
       required: ["input"],
     },
+    inputExample: { input: "name,age\nAda,36\nAlan,41", format: "auto" },
     output: {
       example: {
         ok: true,

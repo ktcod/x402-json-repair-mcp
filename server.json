@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.ktcod/x402-json-repair-mcp",
-  "title": "x402 JSON Repair",
-  "description": "Pay-per-call JSON repair + JSON Schema validation for AI agents (USDC on Base, x402).",
-  "version": "0.1.0",
+  "name": "net.agentfund/us-economic-macro-sec-edgar-onchain-data",
+  "title": "US Economic, SEC EDGAR & On-Chain Data (x402)",
+  "description": "21 paid tools: US macro data, SEC EDGAR filings, on-chain EVM reads. Settled in USDC on Base.",
+  "version": "0.2.0",
   "repository": {
     "url": "https://github.com/ktcod/x402-json-repair-mcp",
     "source": "github"

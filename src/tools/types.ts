@@ -19,6 +19,15 @@ export interface ToolModule {
    */
   discovery?: {
     inputSchema: Record<string, unknown>;
+    /**
+     * A concrete, VALID example arguments object.
+     *
+     * Required for any tool whose inputSchema has `required` fields: the Bazaar validates the
+     * declared example body against the schema and rejects the resource outright
+     * ("input.body: ticker is required") if it is empty. It also measurably improves agent
+     * tool-call accuracy, so prefer a realistic value over a placeholder.
+     */
+    inputExample?: Record<string, unknown>;
     output?: { example?: unknown; schema?: Record<string, unknown> };
   };
   /** Register the tool on an MCP server instance. */

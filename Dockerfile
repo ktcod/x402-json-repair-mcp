@@ -1,4 +1,10 @@
-# Multi-stage build → small runtime image for Azure Container Apps (Node entry).
+# Multi-stage build → small runtime image for the Node entrypoint.
+#
+# Production runs on Cloudflare Workers (see wrangler.toml); this image exists for self-hosting
+# and for directory checks (Glama) that boot the server and introspect it. It deliberately needs
+# NO secrets: initialize/tools/list/ping are answered without payment configuration, so the
+# container starts and passes introspection out of the box. Only a paid tools/call requires
+# PAYOUT_WALLET_ADDRESS and the CDP credentials.
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
