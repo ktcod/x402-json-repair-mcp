@@ -23,6 +23,7 @@ import {
   type ToolPriceSpec,
 } from "./config.js";
 import { buildPaymentGate, type PaymentGate } from "./payments/x402.js";
+import { buildSnapshot, renderMonitorHtml } from "./monitor.js";
 
 const PAID_SPECS = paidToolSpecs();
 const PRICE_SPECS: ToolPriceSpec[] = PAID_SPECS.map((s) => ({
@@ -336,6 +337,23 @@ const FAVICON_ICO_BASE64 =
   "AAABAAEAICAAAAEAIACEAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAEtJ" +
   "REFUeNpj4BZS+D+QmGHUAaMOGHXAsHSA0tE4DDzqgFEHUN0B+CwZdcCoA6jmAHItGXXAqANGHUCxA9xD" +
   "M2mGR9uEow4YdQA6BgC6ObvkiLD89wAAAABJRU5ErkJggg==";
+
+/**
+ * Live settlement monitor for the payout wallet. Free and unauthenticated: it exposes only the
+ * payout address and its on-chain USDC transfers, all of which are already public on Base.
+ */
+app.get("/monitor.json", async (c) => {
+  const payTo = envPayTo(readEnv(c));
+  if (!payTo) return jsonBody(500, { error: "PAYOUT_WALLET_ADDRESS is not configured." });
+  return c.json(await buildSnapshot(payTo, PAID_SPECS));
+});
+
+app.get("/monitor", async (c) => {
+  const payTo = envPayTo(readEnv(c));
+  if (!payTo) return jsonBody(500, { error: "PAYOUT_WALLET_ADDRESS is not configured." });
+  const snapshot = await buildSnapshot(payTo, PAID_SPECS);
+  return c.html(renderMonitorHtml(snapshot, tools.length));
+});
 
 app.get("/favicon.ico", (c) => {
   const bytes = Uint8Array.from(atob(FAVICON_ICO_BASE64), (ch) => ch.charCodeAt(0));
