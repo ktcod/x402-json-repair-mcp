@@ -96,6 +96,7 @@ export const onchainGasTool: ToolModule = {
         },
       },
     },
+    inputExample: { chains: ["base", "ethereum"] },
     output: {
       example: {
         chains: [

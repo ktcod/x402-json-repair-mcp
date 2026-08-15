@@ -169,6 +169,11 @@ export const onchainCrossChainBalanceTool: ToolModule = {
       },
       required: ["address"],
     },
+    inputExample: {
+      address: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      token: "USDC",
+      chains: ["base", "ethereum"],
+    },
     output: {
       example: {
         address: "0x0000000000000000000000000000000000000001",

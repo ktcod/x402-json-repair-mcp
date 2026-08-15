@@ -214,6 +214,7 @@ export const edgar13fHoldingsTool: ToolModule = {
       },
       required: ["ticker"],
     },
+    inputExample: { ticker: "1067983", limit: 10 },
     output: {
       example: {
         cik: "0001067983",

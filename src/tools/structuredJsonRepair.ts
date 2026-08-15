@@ -177,6 +177,7 @@ export const structuredJsonRepairTool: ToolModule = {
       },
       required: ["input"],
     },
+    inputExample: { input: "{name: 'Ada', age: '36',}" },
     output: {
       example: { ok: true, data: { name: "Ada", age: 36 }, changed: true, errors: [], repairs: [] },
       schema: {

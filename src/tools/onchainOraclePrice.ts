@@ -127,6 +127,7 @@ export const onchainOraclePriceTool: ToolModule = {
       },
       required: ["pair"],
     },
+    inputExample: { pair: "ETH/USD", chain: "base" },
     output: {
       example: { chain: "base", pair: "ETH/USD", price: 1877.86, decimals: 8, ageSeconds: 120 },
     },

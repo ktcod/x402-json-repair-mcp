@@ -156,6 +156,7 @@ export const edgarFilingsFeedTool: ToolModule = {
       },
       required: ["ticker"],
     },
+    inputExample: { ticker: "AAPL", forms: ["8-K"], limit: 10 },
     output: {
       example: {
         cik: "0000320193",

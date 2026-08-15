@@ -1,7 +1,19 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { handleMcpRequest } from "./mcp/transport.js";
-import { SERVER_NAME, SERVER_VERSION } from "./mcp/server.js";
+import { SERVER_NAME, SERVER_VERSION, SERVICE_TITLE } from "./mcp/server.js";
+
+/**
+ * One-paragraph service pitch, reused by the manifest and the x402 discovery document.
+ * Kept under the Bazaar's 500-char description limit and front-loaded with the data domains
+ * agents actually search for — catalog ranking weighs description completeness.
+ */
+const SERVICE_DESCRIPTION =
+  "Pay-per-call data tools for AI agents, settled in USDC on Base via x402. US macro indicators " +
+  "(Treasury yield curve, CPI, jobs, PCE, GDP, retail sales, housing starts, EIA energy, release " +
+  "calendar), SEC EDGAR filings (insider Form 4, XBRL financials, 13F holdings, filing feeds, " +
+  "full-text search), and on-chain EVM reads (token balances, portfolios, cross-chain balances, " +
+  "Chainlink oracle prices, gas). Plus deterministic JSON repair and tabular-to-JSON parsing.";
 import { paidToolSpecs, tools } from "./tools/index.js";
 import {
   loadConfig,
@@ -17,6 +29,7 @@ const PRICE_SPECS: ToolPriceSpec[] = PAID_SPECS.map((s) => ({
   name: s.name,
   defaultPrice: s.defaultPrice,
 }));
+const PAID_BY_NAME = new Map(PAID_SPECS.map((s) => [s.name, s]));
 
 // One gate per distinct config (a Worker isolate / Node process serves one deployment).
 let gateCache: { sig: string; gate: Promise<PaymentGate> } | undefined;
@@ -59,6 +72,57 @@ function getGate(config: AppConfig): Promise<PaymentGate> {
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** JSON response with an arbitrary numeric status (Hono's c.json narrows the status type). */
+function jsonBody(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+/**
+ * Unwrap a JSON-RPC `tools/call` response into the tool's plain JSON result.
+ *
+ * Headers are carried over so the x402 `payment-response` receipt survives; content-length is
+ * dropped because the body is rewritten. Anything that isn't a 200 with a JSON-RPC `result`
+ * (a 402, an error envelope) passes through untouched.
+ */
+async function unwrapRpcResult(res: Response): Promise<Response> {
+  if (res.status !== 200) return res;
+
+  let text: string;
+  try {
+    text = await res.clone().text();
+  } catch {
+    return res;
+  }
+
+  let parsed: { result?: { structuredContent?: unknown } } | undefined;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // The transport may emit SSE frames instead of a single JSON document.
+    const frame = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.startsWith("data:"));
+    if (!frame) return res;
+    try {
+      parsed = JSON.parse(frame.slice(5).trim());
+    } catch {
+      return res;
+    }
+  }
+
+  const result = parsed?.result;
+  if (result === undefined || result === null) return res;
+
+  const headers = new Headers(res.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(JSON.stringify(result.structuredContent ?? result), { status: 200, headers });
 }
 
 function rpcError(id: unknown, code: number, message: string): Record<string, unknown> {
@@ -104,8 +168,7 @@ function buildManifest(env: Env, c: Context) {
   return {
     name: SERVER_NAME,
     version: SERVER_VERSION,
-    description:
-      "Pay-per-call MCP server for deterministic JSON repair + JSON Schema validation, settled in USDC on Base via x402.",
+    description: SERVICE_DESCRIPTION,
     mcpEndpoint: `${origin(c)}/mcp`,
     transport: "streamable-http (stateless JSON)",
     payment: {
@@ -134,9 +197,9 @@ function buildDiscovery(env: Env, c: Context) {
     x402Version: 1,
     service: {
       name: SERVER_NAME,
+      title: SERVICE_TITLE,
       version: SERVER_VERSION,
-      description:
-        "Deterministic JSON repair + JSON Schema validation as a pay-per-call MCP tool (USDC on Base).",
+      description: SERVICE_DESCRIPTION,
       mcpEndpoint: `${base}/mcp`,
     },
     resources: PAID_SPECS.map((s) => ({
@@ -180,6 +243,76 @@ app.get("/health", (c) => {
 });
 
 app.get("/.well-known/x402", (c) => c.json(buildDiscovery(readEnv(c), c)));
+
+/**
+ * Per-tool x402 HTTP routes: `POST|GET /x402/<tool>`.
+ *
+ * These exist for DISCOVERY, not convenience. The x402 Bazaar indexes plain HTTP resources
+ * only — every one of its ~15k catalog entries is `type: "http"`, and `?type=mcp` returns
+ * zero — so an MCP endpoint alone can never be listed. Each paid tool therefore needs its own
+ * addressable URL that answers 402 to an unauthenticated probe, matching the shape the
+ * Bazaar validator checks. Callers who already speak MCP should keep using `/mcp`.
+ *
+ * Body (POST) is the tool's arguments object directly, not a JSON-RPC envelope. A successful
+ * call returns the tool's `structuredContent` as plain JSON, with the x402 settlement receipt
+ * in the `payment-response` header.
+ */
+app.on(["GET", "POST"], "/x402/:tool", async (c) => {
+  const toolName = c.req.param("tool");
+  const spec = PAID_BY_NAME.get(toolName);
+  if (!spec) {
+    return jsonBody(404, {
+      error: `Unknown paid tool '${toolName}'.`,
+      availableTools: [...PAID_BY_NAME.keys()],
+    });
+  }
+
+  // Arguments come from the POST body. Tools that take no arguments are called with {}.
+  let args: Record<string, unknown> = {};
+  if (c.req.method === "POST") {
+    try {
+      const raw = await c.req.json();
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        args = raw as Record<string, unknown>;
+      }
+    } catch {
+      // Absent or malformed body → empty arguments; the tool's own schema reports what's missing.
+    }
+  }
+
+  let config: AppConfig;
+  try {
+    config = loadConfig(readEnv(c), PRICE_SPECS);
+  } catch (e) {
+    return jsonBody(500, { error: `Server misconfigured: ${errMessage(e)}` });
+  }
+
+  let gate: PaymentGate;
+  try {
+    gate = await getGate(config);
+  } catch (e) {
+    return jsonBody(503, { error: `Payment layer unavailable: ${errMessage(e)}` });
+  }
+
+  const rpcBody = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: toolName, arguments: args },
+  };
+
+  // Run through the same gate as /mcp so the money-safety rules are identical: a tool that
+  // throws yields isError:true and is returned UNSETTLED rather than billed.
+  const gated = await gate.chargeAndRun(
+    c,
+    toolName,
+    () => handleMcpRequest(c, rpcBody),
+    (status, message) => jsonBody(status, { error: message }),
+    // Advertise the http/body discovery shape: the mcp variant is never indexed by the Bazaar.
+    "http",
+  );
+  return unwrapRpcResult(gated);
+});
 
 app.post("/mcp", async (c) => {
   let body: unknown;

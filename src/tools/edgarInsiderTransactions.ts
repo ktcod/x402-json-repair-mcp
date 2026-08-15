@@ -323,6 +323,7 @@ export const edgarInsiderTransactionsTool: ToolModule = {
       },
       required: ["ticker"],
     },
+    inputExample: { ticker: "AAPL", limit: 5, forms: ["4"] },
     output: {
       example: {
         cik: "0000320193",

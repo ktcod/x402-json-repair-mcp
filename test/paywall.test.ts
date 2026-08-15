@@ -308,3 +308,91 @@ describe("PaymentGate does not settle a failed tool call", () => {
     expect(res.headers.get("payment-response")).toBeTruthy();
   });
 });
+
+/**
+ * chargeAndRun backs the per-tool `/x402/<tool>` HTTP routes, which exist because the x402
+ * Bazaar indexes plain HTTP resources only and cannot see an MCP endpoint. It must apply the
+ * SAME money-safety rules as the JSON-RPC path while rendering errors in the caller's envelope.
+ */
+describe("PaymentGate.chargeAndRun (per-tool HTTP routes)", () => {
+  /** Inner runner returning a fixed body, for asserting settle/no-settle behaviour. */
+  const bodyRunner = (body: string) => async () =>
+    new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+
+  /** Plain-JSON error envelope, as the HTTP routes use (not JSON-RPC). */
+  const plainError = (status: number, message: string) =>
+    new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+
+  it("returns 402 and does not run the tool when payment is absent", async () => {
+    const server = new FakeServer();
+    const gate = makeGate(server);
+    const state = { called: false };
+    const res = await gate.chargeAndRun(
+      fakeContext(),
+      "structured_json_repair",
+      mcpRunner(state),
+      plainError,
+    );
+    expect(res.status).toBe(402);
+    expect(state.called).toBe(false);
+    expect(server.settleCount).toBe(0);
+  });
+
+  it("advertises the synthetic resource path in the 402", async () => {
+    const gate = makeGate(new FakeServer());
+    const res = await gate.chargeAndRun(
+      fakeContext(),
+      "structured_json_repair",
+      mcpRunner({ called: false }),
+      plainError,
+    );
+    const decoded = decodePaymentRequiredHeader(res.headers.get("payment-required") ?? "");
+    expect(decoded.resource.url).toContain(syntheticPathFor("structured_json_repair"));
+  });
+
+  it("renders non-402 failures via the caller's formatter, not JSON-RPC", async () => {
+    const server = new FakeServer({ initError: new Error("facilitator down") });
+    const gate = makeGate(server);
+    const res = await gate.chargeAndRun(
+      fakeContext({ "payment-signature": paymentHeader() }),
+      "structured_json_repair",
+      mcpRunner({ called: false }),
+      plainError,
+    );
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error?: string; jsonrpc?: string };
+    expect(body.error).toContain("facilitator down");
+    expect(body.jsonrpc).toBeUndefined();
+  });
+
+  it("settles a successful call and attaches the receipt", async () => {
+    const server = new FakeServer({ verify: { isValid: true } as VerifyResponse });
+    const gate = makeGate(server);
+    const state = { called: false };
+    const res = await gate.chargeAndRun(
+      fakeContext({ "payment-signature": paymentHeader() }),
+      "structured_json_repair",
+      mcpRunner(state),
+      plainError,
+    );
+    expect(state.called).toBe(true);
+    expect(server.settleCount).toBe(1);
+    expect(res.headers.get("payment-response")).toBeTruthy();
+  });
+
+  it("does NOT settle when the tool reports isError (no charge for a failed upstream)", async () => {
+    const server = new FakeServer({ verify: { isValid: true } as VerifyResponse });
+    const gate = makeGate(server);
+    const res = await gate.chargeAndRun(
+      fakeContext({ "payment-signature": paymentHeader() }),
+      "structured_json_repair",
+      bodyRunner(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [], isError: true } })),
+      plainError,
+    );
+    expect(server.settleCount).toBe(0);
+    expect(res.headers.get("payment-response")).toBeNull();
+  });
+});

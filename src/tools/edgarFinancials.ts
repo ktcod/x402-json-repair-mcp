@@ -251,6 +251,7 @@ export const edgarFinancialsTool: ToolModule = {
       properties: { ticker: { type: "string", description: 'Ticker (e.g. "AAPL") or CIK.' } },
       required: ["ticker"],
     },
+    inputExample: { ticker: "AAPL" },
     output: {
       example: {
         cik: "0000320193",

@@ -165,6 +165,7 @@ export const treasuryYieldCurveTool: ToolModule = {
         days: { type: "number", description: "Recent business days to return (1-30, default 1)." },
       },
     },
+    inputExample: { days: 5 },
     output: {
       example: {
         asOf: "2026-08-14",

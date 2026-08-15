@@ -143,6 +143,7 @@ export const edgarFullTextSearchTool: ToolModule = {
       },
       required: ["query"],
     },
+    inputExample: { query: "material weakness", forms: ["10-K"], limit: 10 },
     output: {
       example: {
         query: "material weakness",

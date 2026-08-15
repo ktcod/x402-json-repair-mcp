@@ -193,6 +193,7 @@ export const macroReleaseCalendarTool: ToolModule = {
         filter: { type: "string", description: 'Substring filter on title, e.g. "CPI".' },
       },
     },
+    inputExample: { limit: 10, filter: "CPI" },
     output: {
       example: {
         asOf: "2026-08-14",
